@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2011 Dan Lecocq
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+'''Command-line utility version of aws-trade-in'''
+
+import os
+import tradein
+import argparse
+
+# Read in some of our arguments
+parser = argparse.ArgumentParser(description='Search for SKUs in the Amazon Trade-In Program')
+
+parser.add_argument('--access-id', dest='accessID', default=None,
+    help='The Access ID associated with your account')
+parser.add_argument('--secret-key', dest='secretKey', default=None,
+    help='The secret key associated with your account')
+parser.add_argument('--associates-id', dest='assocId', default=None,
+    help='Your Amazon Associates ID')
+parser.add_argument('-f', '--file', action='append', default=[],
+    help='The files with SKUs')
+parser.add_argument('-d', '--dir', action='append', default=[],
+    help='Directories to recursively search')
+
+args = parser.parse_args()
+
+search = tradein.Search(
+    AWSAccessKeyId=args.accessID,
+    AWSSecretAccessKey=args.secretKey,
+    AssociateTag=args.assocId)
+
+found = []
+
+def search_sku(sku, path):
+    res = search(sku)
+    res['source'] = path
+    found.append(res)
+    print '------> %s can be traded in for %s' % (
+        res['title'],
+        res['price']['trade']['format']
+    )
+
+def search_file(path):
+    with open(path) as fin:
+        skus = fin.read().strip().split('\n')
+        print 'Reading %i skus in %s' % (len(skus), path)
+        for sku in skus:
+            try:
+                search_sku(sku, path)
+            except tradein.NotFound as e:
+                print '\t%s: Not found' % sku
+                try:
+                    search_sku(sku[1:], path)
+                except Exception as e:
+                    pass
+            except tradein.NotEligible as e:
+                print '\t%s: Not Eligible : %s' % (sku, e.val['title'])
+            except tradein.SearchException as e:
+                print '\t%s: Error: %s' % (sku, repr(e))
+
+for fname in args.file:
+    search_file(fname)
+
+for directory in args.dir:
+    p = os.path.abspath(directory)
+    if os.path.isdir(p):
+        for root, dirs, files in os.walk(p):
+            for fname in files:
+                search_file(os.path.join(root, fname))
+
+print '\n\n'
+print '=' * 50
+# Now, print out our results
+total = 0
+last = None
+group = []
+for item in found:
+    if item['source'] != last:
+        group.sort(reverse=True)
+        for j, i in group:
+            print '\t%8s - %s' % (
+                i['price']['trade']['format'],
+                i['title']
+            )
+        group = []
+        last = item['source']
+        print item['source']
+    group.append((item['price']['trade']['amount'], item))
+    total += item['price']['trade']['amount']
+
+group.sort(reverse=True)
+for j, i in group:
+    print '\t%8s - %s' % (
+        i['price']['trade']['format'],
+        i['title']
+    )
+
+# Now print out the total
+print '=' * 50
+print 'Total:   $%6.2f' % (total / 100)
