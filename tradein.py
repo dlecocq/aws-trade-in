@@ -23,6 +23,7 @@
 
 '''Utilities for searching trade-in value'''
 
+import urllib2
 import bottlenose
 from lxml import objectify
 
@@ -64,7 +65,7 @@ class Search(object):
         try:
             res = self.search(sku)
         except Exception as exp:
-            raise SearchException('Error: API error: %s' % repr(exp))
+            raise SearchException('Error: API error: %s' % exp)
 
         try:
             item = res.Items.Item
@@ -103,11 +104,20 @@ class Search(object):
 
     def search(self, sku, tipe='EAN'):
         '''Given an items SKU, run a search for the item'''
-        return objectify.fromstring(self.amazon.ItemLookup(
-            ItemId=sku,
-            IdType=tipe,
-            SearchIndex='All',
-            ResponseGroup='ItemAttributes'))
+        for i in range(5):
+            try:
+                return objectify.fromstring(self.amazon.ItemLookup(
+                    ItemId=sku,
+                    IdType=tipe,
+                    SearchIndex='All',
+                    ResponseGroup='ItemAttributes'))
+            except urllib2.HTTPError as exc:
+                if i == 4:
+                    raise exc
+                if exc.code == 503:
+                    import time
+                    print '                Sleeping 1 second...'
+                    time.sleep(1)
 
 
 def pprint(res, level=0):
